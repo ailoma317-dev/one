@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { reports as reportsApi, type Report } from "@/lib/supabase";
+import { reports as reportsApi, edgeFunctions, type Report } from "@/lib/supabase";
 import {
   Search,
   TrendingUp,
@@ -84,8 +84,8 @@ export default function Dashboard() {
 
     setAnalyzing(true);
     try {
-      // Create a new report
-      const { data: newReport, error } = await reportsApi.create({
+      // Create a new report first
+      const { data: newReport, error: createError } = await reportsApi.create({
         user_id: user.id,
         product_url: productUrl,
         product_title: "جاري التحليل...",
@@ -95,7 +95,29 @@ export default function Dashboard() {
         credits_used: 1,
       });
 
-      if (error) throw error;
+      if (createError) throw createError;
+      if (!newReport) throw new Error("Failed to create report");
+
+      // Call Edge Function to analyze with OpenAI
+      const { error: analysisError } = await edgeFunctions.analyzeProduct(
+        newReport.id,
+        productUrl
+      );
+
+      if (analysisError) {
+        console.error("Analysis error:", analysisError);
+        // Don't throw - report is created, analysis can be retried
+        toast({
+          title: "تنبيه",
+          description: "تم إنشاء التقرير لكن التحليل قيد المعالجة. يرجى المحاولة لاحقاً.",
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: t.common.success,
+          description: "تم تحليل المنتج بنجاح",
+        });
+      }
 
       // Refresh profile to get updated credits
       await refreshProfile();
@@ -103,16 +125,8 @@ export default function Dashboard() {
       // Refresh reports list
       await fetchReports();
 
-      toast({
-        title: t.common.success,
-        description: "تم إنشاء التقرير بنجاح",
-      });
-
       setProductUrl("");
-      
-      if (newReport) {
-        navigate(`/report/${newReport.id}`);
-      }
+      navigate(`/report/${newReport.id}`);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "حدث خطأ أثناء التحليل";
       toast({

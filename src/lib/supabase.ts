@@ -214,4 +214,35 @@ export const invoices = {
   },
 }
 
+// Edge Functions helpers
+export const edgeFunctions = {
+  analyzeProduct: async (reportId: string, productUrl: string) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      return { data: null, error: new Error('Not authenticated') }
+    }
+
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/analyze-product`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({ reportId, productUrl }),
+      }
+    )
+
+    const result = await response.json()
+    
+    if (!response.ok || !result.success) {
+      return { data: null, error: new Error(result.error || 'Analysis failed') }
+    }
+
+    return { data: result.data, error: null }
+  },
+}
+
 export default supabase
