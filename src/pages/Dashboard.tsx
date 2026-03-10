@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { reports as reportsApi, type Report } from "@/lib/supabase";
 import {
   Search,
   TrendingUp,
@@ -16,23 +18,40 @@ import {
 } from "lucide-react";
 
 export default function Dashboard() {
-  const [user, setUser] = useState<Record<string, any> | null>({ email: "user@example.com" });
-  const [loading, setLoading] = useState(false);
+  const { user, profile, loading: authLoading, refreshProfile } = useAuth();
+  const [loading, setLoading] = useState(true);
   const [productUrl, setProductUrl] = useState("");
-  const [reports, setReports] = useState<Record<string, any>[]>([]);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useLanguage();
 
-  const [credits, setCredits] = useState<number>(50);
-
   useEffect(() => {
-    // Supabase auth and data fetching removed.
-    // Replace with your new database logic here.
-    setReports([
-      { id: "1", product_title: "Sample Product", product_description: "Analysis of sample product", created_at: new Date().toISOString(), credits_used: 5 }
-    ]);
-  }, []);
+    if (!authLoading && !user) {
+      navigate("/auth");
+      return;
+    }
+
+    if (user) {
+      fetchReports();
+    }
+  }, [user, authLoading, navigate]);
+
+  const fetchReports = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const { data, error } = await reportsApi.getAll(user.id);
+      if (error) throw error;
+      setReports(data || []);
+    } catch (error) {
+      console.error("Error fetching reports:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAnalyze = async () => {
     if (!productUrl.trim()) {
@@ -44,13 +63,69 @@ export default function Dashboard() {
       return;
     }
 
-    toast({
-      title: "Analysis Simulation",
-      description: "Database connection removed. Connect your new database to enable analysis.",
-    });
+    if (!user || !profile) {
+      toast({
+        title: t.common.error,
+        description: "يرجى تسجيل الدخول أولاً",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (profile.credits < 1) {
+      toast({
+        title: t.common.error,
+        description: "لا يوجد رصيد كافي. يرجى شراء المزيد من الأرصدة.",
+        variant: "destructive",
+      });
+      navigate("/pricing");
+      return;
+    }
+
+    setAnalyzing(true);
+    try {
+      // Create a new report
+      const { data: newReport, error } = await reportsApi.create({
+        user_id: user.id,
+        product_url: productUrl,
+        product_title: "جاري التحليل...",
+        product_description: null,
+        product_price: null,
+        analysis_data: {},
+        credits_used: 1,
+      });
+
+      if (error) throw error;
+
+      // Refresh profile to get updated credits
+      await refreshProfile();
+      
+      // Refresh reports list
+      await fetchReports();
+
+      toast({
+        title: t.common.success,
+        description: "تم إنشاء التقرير بنجاح",
+      });
+
+      setProductUrl("");
+      
+      if (newReport) {
+        navigate(`/report/${newReport.id}`);
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "حدث خطأ أثناء التحليل";
+      toast({
+        title: t.common.error,
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
@@ -59,7 +134,7 @@ export default function Dashboard() {
   }
 
   const stats = [
-    { label: t.dashboard.creditsRemaining, value: credits.toString(), icon: Zap },
+    { label: t.dashboard.creditsRemaining, value: (profile?.credits ?? 0).toString(), icon: Zap },
     { label: t.dashboard.analysesDone, value: reports.length.toString(), icon: TrendingUp },
     { label: t.dashboard.reportsSaved, value: reports.length.toString(), icon: FileText },
   ];
@@ -75,7 +150,7 @@ export default function Dashboard() {
           className="mb-12"
         >
           <h1 className="text-4xl font-bold mb-2">
-            {t.dashboard.welcome} <span className="text-gradient">{user?.email?.split('@')[0]}</span>
+            {t.dashboard.welcome} <span className="text-gradient">{profile?.full_name || user?.email?.split('@')[0]}</span>
           </h1>
           <p className="text-foreground/70">{t.dashboard.subtitle}</p>
         </motion.div>
@@ -135,15 +210,22 @@ export default function Dashboard() {
                   value={productUrl}
                   onChange={(e) => setProductUrl(e.target.value)}
                   className="pl-10"
+                  disabled={analyzing}
                 />
               </div>
               <Button
                 onClick={handleAnalyze}
                 className="bg-gradient-accent hover:opacity-90 px-8"
+                disabled={analyzing || (profile?.credits ?? 0) < 1}
               >
-                {t.dashboard.analyzeNow}
+                {analyzing ? "جاري التحليل..." : t.dashboard.analyzeNow}
               </Button>
             </div>
+            {(profile?.credits ?? 0) < 1 && (
+              <p className="text-red-500 text-sm mt-2">
+                لا يوجد رصيد كافي. يرجى شراء المزيد من الأرصدة.
+              </p>
+            )}
           </Card>
         </motion.div>
 

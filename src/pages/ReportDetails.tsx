@@ -6,6 +6,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { reports as reportsApi, type Report } from "@/lib/supabase";
 import { ReportCharts } from "@/components/ReportCharts";
 import { ScrollAnimationWrapper } from "@/components/ScrollAnimationWrapper";
 import { CompetitorAnalysisSection } from "@/components/CompetitorAnalysisSection";
@@ -32,12 +34,7 @@ import {
   Palette,
 } from "lucide-react";
 
-interface Report {
-  id: string;
-  product_url: string;
-  product_title: string;
-  product_description: string;
-  product_price: string;
+interface ReportWithAnalysis extends Report {
   analysis_data: {
     productTitle?: string;
     productDescription?: string;
@@ -46,7 +43,7 @@ interface Report {
     pricingStrategy?: string;
     seoOpportunities?: string;
     contentSuggestions?: string;
-    competitorVideos?: Record<string, any>[];
+    competitorVideos?: Record<string, unknown>[];
     logoSuggestions?: {
       idea: string;
       bio: string;
@@ -65,49 +62,61 @@ interface Report {
       specifications?: string[];
     };
   };
-  created_at: string;
 }
 
 export default function ReportDetails() {
   const { id } = useParams();
-  const [report, setReport] = useState<Report | null>(null);
+  const { user, loading: authLoading } = useAuth();
+  const [report, setReport] = useState<ReportWithAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const { scrollYProgress } = useScroll();
   const headerY = useTransform(scrollYProgress, [0, 0.2], [0, -30]);
   const headerOpacity = useTransform(scrollYProgress, [0, 0.15], [1, 0.9]);
 
   useEffect(() => {
+    if (!authLoading && !user) {
+      navigate("/auth");
+      return;
+    }
+
     const fetchReport = async () => {
+      if (!user || !id) return;
+      
       try {
-        // Supabase report fetching removed.
-        // Mocking report data for display.
-        const mockReport: Report = {
-          id: id || "1",
-          product_url: "https://example.com/product",
-          product_title: "Sample Analysis Report",
-          product_description: "This is a simulated analysis report since the database is disconnected.",
-          product_price: "45 SAR",
-          analysis_data: {
-            productTitle: "Sample Analysis Report",
-            competitorAnalysis: "Sample competitor analysis data.",
-            pricingStrategy: "Sample pricing strategy data.",
-            seoOpportunities: "Sample SEO opportunities.",
-          },
-          created_at: new Date().toISOString(),
-        };
-        setReport(mockReport);
+        const { data, error } = await reportsApi.getById(id, user.id);
+        if (error) throw error;
+        
+        if (!data) {
+          toast({
+            title: t.common.error,
+            description: "التقرير غير موجود",
+            variant: "destructive",
+          });
+          navigate("/dashboard");
+          return;
+        }
+        
+        setReport(data as ReportWithAnalysis);
       } catch (error) {
         console.error("Error fetching report:", error);
+        toast({
+          title: t.common.error,
+          description: "حدث خطأ أثناء تحميل التقرير",
+          variant: "destructive",
+        });
+        navigate("/dashboard");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchReport();
-  }, [id, navigate, toast, t]);
+    if (user) {
+      fetchReport();
+    }
+  }, [id, user, authLoading, navigate, toast, t]);
 
   const handleExportJSON = () => {
     if (!report) return;
@@ -137,7 +146,7 @@ export default function ReportDetails() {
         // Handle arrays
         if (Array.isArray(value)) {
           if (value.length === 0) return "لا توجد بيانات";
-          return value.map((item, index) => {
+          return value.map((item) => {
             if (typeof item === 'object') {
               return formatObject(item, 0);
             }
@@ -280,7 +289,7 @@ ${toDisplayString(analysis.recommendations)}
     });
   };
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center gradient-mesh-bg">
         <motion.div

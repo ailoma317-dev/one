@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -20,29 +21,42 @@ export default function Auth() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useLanguage();
-
-  const [user, setUser] = useState<Record<string, any> | null>(null);
+  const { user, signIn, signUp, signInWithGoogle, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    // Supabase auth check removed.
-  }, [navigate]);
+    if (user && !authLoading) {
+      navigate("/dashboard");
+    }
+  }, [user, authLoading, navigate]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // Supabase authentication logic removed.
-      // Replace with your new authentication logic here.
-      toast({
-        title: isLogin ? t.auth.welcomeBack : t.common.accountCreated,
-        description: "Authentication simulation successful.",
-      });
-      navigate("/dashboard");
-    } catch (error: any) {
+      if (isLogin) {
+        const { error } = await signIn(email, password);
+        if (error) throw error;
+        
+        toast({
+          title: t.auth.welcomeBack,
+          description: t.auth.signInSuccess || "تم تسجيل الدخول بنجاح",
+        });
+        navigate("/dashboard");
+      } else {
+        const { error } = await signUp(email, password, fullName);
+        if (error) throw error;
+        
+        toast({
+          title: t.common.accountCreated,
+          description: t.auth.checkEmail || "تم إنشاء الحساب بنجاح. يرجى التحقق من بريدك الإلكتروني للتأكيد.",
+        });
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "حدث خطأ غير متوقع";
       toast({
         title: t.common.error,
-        description: error.message,
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -51,11 +65,26 @@ export default function Auth() {
   };
 
   const handleGoogleAuth = async () => {
-    toast({
-      title: "OAuth Simulation",
-      description: "Google login is currently disabled while transitioning databases.",
-    });
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) throw error;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "حدث خطأ أثناء تسجيل الدخول بـ Google";
+      toast({
+        title: t.common.error,
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
@@ -135,6 +164,7 @@ export default function Auth() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10"
                   required
+                  minLength={6}
                 />
               </div>
             </div>

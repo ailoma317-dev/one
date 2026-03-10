@@ -8,44 +8,59 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { invoices as invoicesApi, subscriptions as subscriptionsApi, type Invoice, type Subscription } from "@/lib/supabase";
 import { User, Mail, LogOut, Lock } from "lucide-react";
 
 export default function Profile() {
-  const [user, setUser] = useState<Record<string, any> | null>({ email: "user@example.com", created_at: new Date().toISOString() });
+  const { user, profile, loading: authLoading, signOut, updateProfile, updatePassword } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [fullName, setFullName] = useState("Test User");
-  const [subscriptionStatus, setSubscriptionStatus] = useState<Record<string, any> | null>({ subscribed: true });
+  const [fullName, setFullName] = useState("");
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
-  const [invoices, setInvoices] = useState<Record<string, any>[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
   const { t } = useLanguage();
 
   useEffect(() => {
-    // Supabase auth and session fetching removed.
-    fetchInvoices();
-  }, []);
+    if (!authLoading && !user) {
+      navigate("/auth");
+      return;
+    }
 
-  const checkSubscription = async () => {
-    // Supabase function invocation removed.
+    if (profile) {
+      setFullName(profile.full_name || "");
+    }
+
+    if (user) {
+      fetchInvoices();
+      fetchSubscription();
+    }
+  }, [user, profile, authLoading, navigate]);
+
+  const fetchSubscription = async () => {
+    if (!user) return;
+    
+    try {
+      const { data } = await subscriptionsApi.get(user.id);
+      setSubscription(data);
+    } catch (error) {
+      console.error("Error fetching subscription:", error);
+    }
   };
 
   const fetchInvoices = async () => {
+    if (!user) return;
+    
     setInvoicesLoading(true);
     try {
-      const mockInvoices = [
-        {
-          id: 'INV-001',
-          amount: '45.00',
-          currency: 'SAR',
-          status: 'paid',
-          created_at: new Date().toISOString(),
-        }
-      ];
-      setInvoices(mockInvoices);
+      const { data, error } = await invoicesApi.getAll(user.id);
+      if (error) throw error;
+      setInvoices(data || []);
     } catch (error) {
       console.error("Error fetching invoices:", error);
     } finally {
@@ -54,25 +69,78 @@ export default function Profile() {
   };
 
   const handleSignOut = async () => {
-    toast({ title: "Sign Out", description: "Session cleared (Simulation)." });
+    await signOut();
+    toast({ title: t.common.success, description: "تم تسجيل الخروج بنجاح" });
     navigate("/");
   };
 
   const handleUpdateProfile = async () => {
-    toast({
-      title: t.common.success,
-      description: "Profile update simulation successful.",
-    });
+    setLoading(true);
+    try {
+      const { error } = await updateProfile({ full_name: fullName });
+      if (error) throw error;
+      
+      toast({
+        title: t.common.success,
+        description: "تم تحديث الملف الشخصي بنجاح",
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "حدث خطأ أثناء التحديث";
+      toast({
+        title: t.common.error,
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleChangePassword = async () => {
-    toast({
-      title: "Password Change Simulation",
-      description: "Password update is currently disabled while transitioning databases.",
-    });
+    if (newPassword !== confirmNewPassword) {
+      toast({
+        title: t.common.error,
+        description: "كلمات المرور غير متطابقة",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast({
+        title: t.common.error,
+        description: "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await updatePassword(newPassword);
+      if (error) throw error;
+      
+      toast({
+        title: t.common.success,
+        description: "تم تغيير كلمة المرور بنجاح",
+      });
+      
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "حدث خطأ أثناء تغيير كلمة المرور";
+      toast({
+        title: t.common.error,
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (loading) {
+  if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-accent"></div>
@@ -124,7 +192,7 @@ export default function Profile() {
                   <Input
                     id="email"
                     type="email"
-                    value={user?.email}
+                    value={user?.email || ""}
                     disabled
                     className="pl-10 opacity-60"
                   />
@@ -181,7 +249,7 @@ export default function Profile() {
                   <Button
                     onClick={handleChangePassword}
                     className="bg-gradient-accent hover:opacity-90"
-                    disabled={!currentPassword || !newPassword || !confirmNewPassword}
+                    disabled={!currentPassword || !newPassword || !confirmNewPassword || loading}
                   >
                     Update Password
                   </Button>
@@ -192,8 +260,9 @@ export default function Profile() {
                 <Button
                   onClick={handleUpdateProfile}
                   className="bg-gradient-accent hover:opacity-90"
+                  disabled={loading}
                 >
-                  {t.profile.saveChanges}
+                  {loading ? "جاري الحفظ..." : t.profile.saveChanges}
                 </Button>
                 <Button
                   onClick={handleSignOut}
@@ -225,10 +294,10 @@ export default function Profile() {
               <p className="text-foreground/70 text-center py-4">No invoices found</p>
             ) : (
               <div className="space-y-4">
-                {invoices.map((invoice, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 bg-background/50 rounded-lg">
+                {invoices.map((invoice) => (
+                  <div key={invoice.id} className="flex items-center justify-between p-4 bg-background/50 rounded-lg">
                     <div>
-                      <p className="font-medium">Invoice #{invoice.id}</p>
+                      <p className="font-medium">Invoice #{invoice.id.slice(0, 8)}</p>
                       <p className="text-sm text-foreground/70">{new Date(invoice.created_at).toLocaleDateString()}</p>
                     </div>
                     <div className="text-right">
@@ -257,13 +326,21 @@ export default function Profile() {
               <div>
                 <p className="text-foreground/70 text-sm mb-1">{t.profile.memberSince}</p>
                 <p className="text-lg font-semibold">
-                  {new Date(user?.created_at).toLocaleDateString()}
+                  {user?.created_at ? new Date(user.created_at).toLocaleDateString() : "-"}
                 </p>
               </div>
               <div>
                 <p className="text-foreground/70 text-sm mb-1">{t.profile.currentPlan}</p>
                 <p className="text-lg font-semibold">
-                  {loading ? "..." : (subscriptionStatus && subscriptionStatus.subscribed ? "Premium Plan" : t.profile.freeTrial)}
+                  {subscription?.status === 'active' || subscription?.status === 'trialing' 
+                    ? "Premium Plan" 
+                    : t.profile.freeTrial}
+                </p>
+              </div>
+              <div>
+                <p className="text-foreground/70 text-sm mb-1">الرصيد المتبقي</p>
+                <p className="text-lg font-semibold">
+                  {profile?.credits ?? 0} رصيد
                 </p>
               </div>
             </div>
